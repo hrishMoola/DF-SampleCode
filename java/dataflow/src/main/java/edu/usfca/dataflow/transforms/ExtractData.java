@@ -1,15 +1,24 @@
 package edu.usfca.dataflow.transforms;
 
-import java.util.Set;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
 
-import org.apache.beam.sdk.transforms.PTransform;
-import org.apache.beam.sdk.values.PCollection;
+import com.google.protobuf.InvalidProtocolBufferException;
+import com.google.protobuf.util.JsonFormat;
+import com.google.spanner.v1.DeleteSessionRequest;
+import jdk.nashorn.internal.objects.annotations.Constructor;
+import org.apache.beam.sdk.transforms.*;
+import org.apache.beam.sdk.values.*;
 import org.apache.commons.lang3.StringUtils;
 
 import edu.usfca.dataflow.transforms.PurchaserProfiles.MergeProfiles;
 import edu.usfca.protobuf.Common.DeviceId;
 import edu.usfca.protobuf.Profile.InAppPurchaseProfile;
 import edu.usfca.protobuf.Profile.PurchaserProfile;
+import org.codehaus.jackson.JsonParser;
+import org.codehaus.jackson.map.ObjectMapper;
+
+import static com.google.protobuf.util.JsonFormat.parser;
 
 /**
  * Task C: You need to implement three PTransforms.
@@ -39,11 +48,11 @@ public class ExtractData {
    * Note that you do not have to check for errors (in input) or handle "corrupted data" in this PTransform.
    */
   public static class ExtractInAppPurchaseData
-      extends PTransform<PCollection<PurchaserProfile>, PCollection<InAppPurchaseProfile>> {
+          extends PTransform<PCollection<PurchaserProfile>, PCollection<InAppPurchaseProfile>> {
 
     @Override
     public PCollection<InAppPurchaseProfile> expand(PCollection<PurchaserProfile> input) {
-      return null;
+      return input.apply(new GetMergedInAppPurchaseProfiles("bundle")).apply(Values.create());
     }
   }
 
@@ -88,10 +97,103 @@ public class ExtractData {
 
     @Override
     public PCollection<DeviceId> expand(PCollection<PurchaserProfile> input) {
-      return null;
+
+      return input.apply(new GetMergedInAppPurchaseProfiles("deviceId")).apply(Filter.by(new SerializableFunction<KV<String,InAppPurchaseProfile>, Boolean>() {
+        @Override
+        public Boolean apply(KV<String,InAppPurchaseProfile> input) {
+          if(bundles.contains(input.getValue().getBundle()))
+            return (input.getValue().getNumPurchasers() >= numPurchases && input.getValue().getTotalAmount() >= totalAmount);
+          return false;
+        }
+      }))
+              .apply(Keys.create())
+              .apply(MapElements.into(new TypeDescriptor<DeviceId>(){})
+                      .via((ProcessFunction<String, DeviceId>) lol -> {
+                        DeviceId.Builder messageBuilder = DeviceId.newBuilder();
+                        JsonFormat.parser().usingTypeRegistry(JsonFormat.TypeRegistry.getEmptyTypeRegistry()).merge(lol, messageBuilder);
+                        return messageBuilder.build();
+                      }));
     }
   }
 
+  /***
+   * Helper PTransform Method. Gets a KV of String to InAppPurchase Profile.
+   * Key is of type String, and can be Bundle name or Device Id, as per requirement.
+   * The subsequent grouping and merging then comes out with respect to the key in question. This is done as merging logic can be same, but grouping parameter is variable.
+   */
+
+  public static class GetMergedInAppPurchaseProfiles extends PTransform<PCollection<PurchaserProfile>, PCollection<KV<String,InAppPurchaseProfile>>> {
+
+    final String key;
+
+    GetMergedInAppPurchaseProfiles(String keyType) {
+      this.key = keyType;
+    }
+
+    @Override
+    public PCollection<KV<String,InAppPurchaseProfile>> expand(PCollection<PurchaserProfile> input) {
+
+      return input.apply(new CreateMultipleProfiles(this.key))
+              .apply(GroupByKey.create())
+              .apply(ParDo.of(new DoFn<KV<String, Iterable<InAppPurchaseProfile>>, KV<String,InAppPurchaseProfile>>() {
+                @ProcessElement
+                public void process(ProcessContext processContext){
+                  InAppPurchaseProfile.Builder mergedInApp = InAppPurchaseProfile.newBuilder();
+                  processContext.element().getValue().forEach(inAppPurchaseProfile -> {
+                    mergedInApp.setBundle(inAppPurchaseProfile.getBundle())
+                            .setTotalAmount(mergedInApp.getTotalAmount() + inAppPurchaseProfile.getTotalAmount())
+                            .setNumPurchasers(1);
+                });
+                  processContext.output(KV.of(processContext.element().getKey(), mergedInApp.build()));
+                }
+              }));
+    }
+  }
+
+  /**
+   * Helper
+   */
+
+  public static class CreateMultipleProfiles extends PTransform<PCollection<PurchaserProfile>, PCollection<KV<String,InAppPurchaseProfile>>> {
+
+    final String key;
+
+    CreateMultipleProfiles(String keyType) {
+      this.key = keyType;
+    }
+
+    @Override
+    public PCollection<KV<String, InAppPurchaseProfile>> expand(PCollection<PurchaserProfile> input) {
+      PCollectionView<String> key = input.getPipeline().apply(Create.of(this.key)).apply(View.asSingleton());
+
+      return input.apply(ParDo.of(new DoFn<PurchaserProfile, KV<String, InAppPurchaseProfile>>() {
+        @ProcessElement
+        public void process(ProcessContext processContext) throws InvalidProtocolBufferException {
+          String deviceId = JsonFormat.printer().print(processContext.element().getId());
+          Map<String, PurchaserProfile.PurchaserList> bundleWiseDetails = processContext.element().getBundlewiseDetailsMap();
+          int num_purchases = processContext.element().getPurchaseTotal();
+
+          bundleWiseDetails.forEach((bundle, detailsList) -> {
+            String keyType = processContext.sideInput(key);
+            InAppPurchaseProfile.Builder inappBuilder = InAppPurchaseProfile.newBuilder();
+            AtomicReference<Long> totalAmount = new AtomicReference<>(0L);
+            detailsList.getBundlewiseDetailsList().forEach(purchaserDetails -> {
+              totalAmount.updateAndGet(v -> v + purchaserDetails.getAmount());
+            });
+
+            inappBuilder.setBundle(bundle).setNumPurchasers(num_purchases).setTotalAmount(totalAmount.get());
+
+            if (keyType.equalsIgnoreCase("bundle"))
+              processContext.output(KV.of(bundle, inappBuilder.build()));
+            else if (keyType.equalsIgnoreCase("deviceId"))
+              processContext.output(KV.of(deviceId, inappBuilder.build()));
+            else if(keyType.equalsIgnoreCase("bundle^deviceid"))
+              processContext.output(KV.of(bundle + "^" + deviceId, inappBuilder.build()));
+          });
+        }
+      }).withSideInputs(key));
+    }
+  }
   /**
    * This will be applied to the output of {@link MergeProfiles}.
    *
@@ -146,7 +248,43 @@ public class ExtractData {
 
     @Override
     public PCollection<DeviceId> expand(PCollection<PurchaserProfile> input) {
-      return null;
+
+      Map<String, String> inputs = new HashMap<>();
+      inputs.put("bundle", bundle);
+      inputs.put("days", String.valueOf(CONSEC_DAYS));
+      PCollectionView<Map<String, String>> inputListView = input.getPipeline().apply(Create.of(inputs)).apply(View.asMap());
+      return input.apply(ParDo.of(new DoFn<PurchaserProfile, DeviceId>() {
+        @ProcessElement
+        public void process(ProcessContext processContext) throws InvalidProtocolBufferException {
+
+          Map<String, PurchaserProfile.PurchaserList> bundleWiseDetails = processContext.element().getBundlewiseDetailsMap();
+
+          bundleWiseDetails.forEach((bundle, detailsList) -> {
+            String inputBundle = processContext.sideInput(inputListView).get("bundle");
+            Integer inputDays = Integer.parseInt(processContext.sideInput(inputListView).get("days"));
+            if(bundle.equalsIgnoreCase(inputBundle)){
+              boolean consec = true;
+              Set<Integer> events = new TreeSet<>();
+              detailsList.getBundlewiseDetailsList().forEach(purchaserDetails -> {
+                events.add(millisToDay(purchaserDetails.getEventAt()));
+              });
+              if(events.size() >= inputDays){
+                Integer[] eventsArray = events.toArray(new Integer[0]);
+                for(int i = 0 ; i < eventsArray.length - 1; i ++){
+                  if (eventsArray[i + 1] - eventsArray[i] != 1) {
+                    consec = false;
+                    break;
+                  }
+                }
+              } else
+                consec = false;
+              if(consec)
+                processContext.output(processContext.element().getId());
+            }
+            });
+        }
+      }).withSideInputs(inputListView));
+//      return null;
     }
   }
 }

@@ -69,16 +69,14 @@ public class LogParser {
       final String reqUrlString = httpReq.get("requestUrl").getAsString();
 
       final int status = httpReq.has("status") ? httpReq.get("status").getAsInt() : -999;
-      switch (status) {
-        case 200: // OK
-          break;
-        default:
-          return null;
+      // OK
+      if (status != 200) {
+        return null;
       }
 
       Map<String, String> queryMap;
       try {
-        queryMap = getQueryMap(reqUrlString);
+          queryMap = getQueryMap(reqUrlString);
         final DeviceId id = getDeviceId(queryMap);
         if (id == null) {
           return null;
@@ -128,13 +126,13 @@ public class LogParser {
   private static DeviceId getDeviceId(Map<String, String> queryMap) {
     DeviceId.Builder did = DeviceId.newBuilder();
 
-    final String idfa = queryMap.getOrDefault("gps_adid", "");
-    final String adid = queryMap.getOrDefault("ios_idfa", "");
-    if (StringUtils.isBlank(idfa) != StringUtils.isBlank(adid)) {
+    final String adid = queryMap.getOrDefault("gps_adid", "");
+    final String idfa = queryMap.getOrDefault("ios_idfa", "");
+    if (StringUtils.isBlank(idfa) == StringUtils.isBlank(adid)) {
       return null;
     }
 
-    if (StringUtils.isBlank(idfa)) {
+    if (!StringUtils.isBlank(idfa)) {
       did.setOs(OsType.IOS).setUuid(idfa.toUpperCase());
     } else {
       did.setOs(OsType.ANDROID).setUuid(adid.toUpperCase());
@@ -165,9 +163,8 @@ public class LogParser {
 
   public static Map<String, String> getQueryMap(String reqUrlString) throws URISyntaxException {
     // final String reqUrlStringEncoded = reqUrlString.replace("{", "%7B").replace("}", "%7D");
-    final Map<String, String> queryMap = splitQuery(reqUrlString);
 
-    return queryMap;
+    return splitQuery(reqUrlString);
   }
 
   public static Map<String, String> splitQuery(String urlString) throws URISyntaxException {

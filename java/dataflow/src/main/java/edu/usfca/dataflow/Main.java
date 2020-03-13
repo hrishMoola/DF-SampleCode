@@ -50,7 +50,7 @@ import edu.usfca.dataflow.transforms.PurchaserProfiles.MergeProfiles;
  */
 public class Main {
   // TODO: Make sure you change USER_EMAIL below to your @dons email address.
-  final private static String USER_EMAIL = "hello, world";
+  final private static String USER_EMAIL = "hmulabagula@dons.usfca.edu";
 
   static String getUserEmail() {
     return USER_EMAIL;

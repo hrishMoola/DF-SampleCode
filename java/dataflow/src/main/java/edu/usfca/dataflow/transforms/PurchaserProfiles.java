@@ -1,10 +1,15 @@
 package edu.usfca.dataflow.transforms;
-
-import org.apache.beam.sdk.transforms.PTransform;
+import edu.usfca.protobuf.Common;
+import edu.usfca.protobuf.Event;
+import org.apache.beam.sdk.transforms.*;
+import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
 
 import edu.usfca.dataflow.utils.LogParser;
 import edu.usfca.protobuf.Profile.PurchaserProfile;
+import org.apache.beam.sdk.values.TypeDescriptor;
+import org.apache.beam.sdk.values.TypeDescriptors;
+import org.joda.time.Duration;
 
 /**
  * Task B.
@@ -45,7 +50,30 @@ public class PurchaserProfiles {
 
     @Override
     public PCollection<PurchaserProfile> expand(PCollection<String> input) {
-      return null;
+
+      return input.apply(ParDo.of(new DoFn<String, KV<Common.DeviceId, Event.PurchaseEvent>>(){
+        @ProcessElement
+        public void process(ProcessContext processContext){
+          KV<Common.DeviceId, Event.PurchaseEvent> kv = LogParser.getIdAndPurchaseEvent(processContext.element());
+          if(kv!=null)
+            processContext.output(kv);
+        }
+      })).apply(ParDo.of(new DoFn<KV<Common.DeviceId, Event.PurchaseEvent>, PurchaserProfile>() {
+        @ProcessElement
+        public void process(ProcessContext processContext) {
+          Event.PurchaseEvent purchaseEvent = processContext.element().getValue();
+           PurchaserProfile.Builder purchaserProfileBuilder = PurchaserProfile.newBuilder();
+
+           PurchaserProfile.PurchaserDetails.Builder purchaserDetailsBuilder = PurchaserProfile.PurchaserDetails.newBuilder();
+           purchaserDetailsBuilder.setAmount(purchaseEvent.getAmount())
+                   .setEventId(purchaseEvent.getEventId())
+                   .setEventAt(purchaseEvent.getEventAt())
+                   .setStoreName(purchaseEvent.getStore().name());
+          purchaserProfileBuilder.setId(processContext.element().getKey())
+                  .setPurchaseTotal(1).putBundlewiseDetails(purchaseEvent.getAppBundle(), edu.usfca.protobuf.Profile.PurchaserProfile.PurchaserList.newBuilder().addBundlewiseDetails(purchaserDetailsBuilder.build()).build());
+        processContext.output(purchaserProfileBuilder.build());
+        }
+      }));
     }
   }
 
@@ -73,7 +101,11 @@ public class PurchaserProfiles {
 
     @Override
     public PCollection<PurchaserProfile> expand(PCollection<PurchaserProfile> input) {
-      return null;
+
+       return input.apply(MapElements.into(TypeDescriptors.kvs(TypeDescriptors.strings(), new TypeDescriptor<PurchaserProfile>(){}))
+               .via((ProcessFunction<PurchaserProfile, KV<String, PurchaserProfile>>) item -> KV.of(item.getId().getUuid().toLowerCase() + "^" + item.getId().getOs().name(), item)))
+            .apply(Combine.perKey(new CustomUtils.PurchaseProfilesCombiner())).apply(Values.create());
     }
+
   }
 }

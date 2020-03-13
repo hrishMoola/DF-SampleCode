@@ -7,6 +7,7 @@ import "event.proto";
 import "vendor/openrtb.proto";
 
 message PurchaserProfile {
+  reserved 4 to 100;
   DeviceId id = 1;
   
   // total number of purchase events (for this user).
@@ -17,6 +18,19 @@ message PurchaserProfile {
   // Please do NOT discuss/share your proto message details.
   // If two submissions end up looking similar, that'd raise a red flag
   // --> seriously, ALL of your future commits will be scrutinized by the teaching staff.
+
+    map<string, PurchaserList> bundlewise_details = 3;
+
+    message PurchaserList{
+        repeated PurchaserDetails bundlewise_details = 1;
+    }
+    message PurchaserDetails{
+          string event_id = 1;
+          string store_name = 2;
+          int64 amount = 3;
+          int64 event_at = 4;
+    }
+
 }
 
 // This summarizes IAP amounts/counts for each app bundle.
