@@ -1,4 +1,6 @@
 package edu.usfca.dataflow.transforms;
+import com.google.protobuf.InvalidProtocolBufferException;
+import com.google.protobuf.util.JsonFormat;
 import edu.usfca.protobuf.Common;
 import edu.usfca.protobuf.Event;
 import org.apache.beam.sdk.transforms.*;
@@ -9,7 +11,9 @@ import edu.usfca.dataflow.utils.LogParser;
 import edu.usfca.protobuf.Profile.PurchaserProfile;
 import org.apache.beam.sdk.values.TypeDescriptor;
 import org.apache.beam.sdk.values.TypeDescriptors;
-import org.joda.time.Duration;
+
+
+import static edu.usfca.dataflow.transforms.CustomUtils.*;
 
 /**
  * Task B.
@@ -102,10 +106,77 @@ public class PurchaserProfiles {
     @Override
     public PCollection<PurchaserProfile> expand(PCollection<PurchaserProfile> input) {
 
-       return input.apply(MapElements.into(TypeDescriptors.kvs(TypeDescriptors.strings(), new TypeDescriptor<PurchaserProfile>(){}))
-               .via((ProcessFunction<PurchaserProfile, KV<String, PurchaserProfile>>) item -> KV.of(item.getId().getUuid().toLowerCase() + "^" + item.getId().getOs().name(), item)))
-            .apply(Combine.perKey(new CustomUtils.PurchaseProfilesCombiner())).apply(Values.create());
+
+//      PCollection<PurchaserProfile> profiles = null;
+        return input.apply(MapElements.into(TypeDescriptors.kvs(TypeDescriptors.strings(), new TypeDescriptor<PurchaserProfile>(){}))
+                .via((ProcessFunction<PurchaserProfile, KV<String, PurchaserProfile>>) item -> KV.of(JsonFormat.printer().print(item.getId()), item)))
+                .apply(Combine.perKey(new CustomUtils.PurchaseProfilesCombiner()))
+//                .apply(ParDo.of(new DoFn<KV<String, PurchaserProfile>, PurchaserProfile>() {
+//                  @ProcessElement
+//                  public void process(ProcessContext processContext) throws InvalidProtocolBufferException {
+//                    processContext.output(PurchaserProfile.newBuilder(processContext.element().getValue()).setId(getDeviceId(processContext.element().getKey())).build());
+//                  }
+//                }));
+//                .apply(ParDo.of(new DoFn<KV<String, PurchaseProfilesCombiner.AccumT>, PurchaserProfile>() {
+////                  @ProcessElement
+////                  public void process(ProcessContext processContext) throws InvalidProtocolBufferException {
+////                    Map<String, PurchaserProfile.PurchaserList> bundleWiseList = new HashMap<>();
+////                    PurchaseProfilesCombiner.AccumT accumulator = processContext.element().getValue();
+////                    Common.DeviceId deviceId = getDeviceId(processContext.element().getKey());
+////                    if(deviceId.getUuid().contains("CBA25CC2")){
+////                      System.out.println("break");
+////                    }
+////                      for(int i = 0; i < accumulator.counter ; i ++){
+////                      PurchaserProfile.PurchaserList.Builder currentList = PurchaserProfile.PurchaserList.newBuilder(bundleWiseList.getOrDefault(accumulator.bundle[i], PurchaserProfile.PurchaserList.getDefaultInstance()));
+////                      currentList.addBundlewiseDetails(PurchaserProfile.PurchaserDetails.newBuilder().setAmount(accumulator.amount[i]).setEventAt(accumulator.eventAt[i]).setEventId("123L").setStoreName("some").build());
+////                    }
+////                    PurchaserProfile.Builder purchaseProfileBuilder = PurchaserProfile.newBuilder();
+////                    processContext.output(purchaseProfileBuilder.setPurchaseTotal(accumulator.counter).setId(deviceId)
+////                            .putAllBundlewiseDetails(bundleWiseList).build());
+////                  }
+////                }));
+                      .apply(ParDo.of(new DoFn<KV<String, Aggre>, PurchaserProfile>() {
+                  @ProcessElement
+                  public void process(ProcessContext processContext) throws InvalidProtocolBufferException {
+                    processContext.output(PurchaserProfile.newBuilder()
+                            .setId(getDeviceId(processContext.element().getKey()))
+                            .putAllBundlewiseDetails(processContext.element().getValue().getBundleWiseList())
+                            .setPurchaseTotal(processContext.element().getValue().getPurchaseTotal())
+                            .build());
+                  }
+                }));
+//       profiles.apply(ParDo.of(new someDoFn()));
+//       return profiles;
+    }
+    private Common.DeviceId getDeviceId(String key) throws InvalidProtocolBufferException {
+      Common.DeviceId.Builder messageBuilder = Common.DeviceId.newBuilder();
+      JsonFormat.parser().usingTypeRegistry(JsonFormat.TypeRegistry.getEmptyTypeRegistry()).merge(key, messageBuilder);
+      return messageBuilder.build();
+    }
+  }
+  public static class someDoFn extends DoFn<PurchaserProfile, Void> {
+    @Setup
+    public void setup() {
+//      System.out.println("--- Starting to print out the contents. This is likely to be printed more than once. Why?");
     }
 
+    @ProcessElement
+    public void process(@Element PurchaserProfile elem) {
+      if(elem.getId().getUuid().contains("CBA25CC2"))
+        System.out.format("Profiles: %s\n", elem.toString());
+    }
   }
+
+
+//
+//  Map<String, edu.usfca.protobuf.Profile.PurchaserProfile.PurchaserList> bundleWiseList = new HashMap<>();
+//            for(int i = 0; i < accumulator.counter ; i ++){
+//    edu.usfca.protobuf.Profile.PurchaserProfile.PurchaserList.Builder currentList = edu.usfca.protobuf.Profile.PurchaserProfile.PurchaserList.newBuilder(bundleWiseList.getOrDefault(accumulator.bundle[i], edu.usfca.protobuf.Profile.PurchaserProfile.PurchaserList.getDefaultInstance()));
+//    currentList.addBundlewiseDetails(edu.usfca.protobuf.Profile.PurchaserProfile.PurchaserDetails.newBuilder().setAmount(accumulator.amount[i]).setEventAt(accumulator.eventAt[i]).setEventId("123L").setStoreName("some").build());
+//  }
+//  edu.usfca.protobuf.Profile.PurchaserProfile.Builder purchaseProfileBuilder = edu.usfca.protobuf.Profile.PurchaserProfile.newBuilder();
+//            return purchaseProfileBuilder.setPurchaseTotal(accumulator.counter)
+//          .putAllBundlewiseDetails(bundleWiseList).build();
+//}
+
 }

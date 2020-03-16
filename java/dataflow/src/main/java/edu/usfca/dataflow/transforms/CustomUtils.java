@@ -3,53 +3,82 @@ package edu.usfca.dataflow.transforms;
 import edu.usfca.protobuf.Profile;
 import org.apache.beam.sdk.transforms.Combine;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.io.Serializable;
+import java.util.*;
 
 
 public class CustomUtils {
-    public static class PurchaseProfilesCombiner extends Combine.CombineFn<Profile.PurchaserProfile, Profile.PurchaserProfile, Profile.PurchaserProfile> {
+    public static class PurchaseProfilesCombiner extends Combine.CombineFn<Profile.PurchaserProfile, Aggre, Aggre> {
+
+
         @Override
-        public Profile.PurchaserProfile createAccumulator() {
-            return Profile.PurchaserProfile.getDefaultInstance();
+        public Aggre createAccumulator() {
+            return new Aggre();
         }
 
         @Override
-        public Profile.PurchaserProfile addInput(Profile.PurchaserProfile mutableAccumulator, Profile.PurchaserProfile input) {
-            mutableAccumulator = Profile.PurchaserProfile.newBuilder(input).build();
+        public Aggre addInput(Aggre mutableAccumulator, Profile.PurchaserProfile input) {
+            input.getBundlewiseDetailsMap().forEach((bundle, details) -> {
+                mutableAccumulator.add(bundle, edu.usfca.protobuf.Profile.PurchaserProfile.PurchaserDetails.newBuilder().setAmount(details.getBundlewiseDetailsList().get(0)
+                        .getAmount()).setEventAt(details.getBundlewiseDetailsList().get(0).getEventAt())
+                        .setEventId("123L").setStoreName("some").build());
+            });
             return mutableAccumulator;
         }
 
         @Override
-        public Profile.PurchaserProfile mergeAccumulators(Iterable<Profile.PurchaserProfile> accumulators) {
-            Map<String, Profile.PurchaserProfile.PurchaserList> newMap = new HashMap<>();
-            Profile.PurchaserProfile.Builder mergedProfile =  Profile.PurchaserProfile.newBuilder();
-            int purchaseTotal = 0;
-            for( Profile.PurchaserProfile profile : accumulators) {
-                if(profile.getPurchaseTotal() > 0 ){
-                    mergedProfile = Profile.PurchaserProfile.newBuilder(profile);
-                    Map<String, Profile.PurchaserProfile.PurchaserList> bundleWiseMap = profile.getBundlewiseDetailsMap();
-                    String bundle = (String) bundleWiseMap.keySet().toArray()[0];
-                    purchaseTotal += profile.getPurchaseTotal();
-
-                    if(newMap.containsKey(bundle)){
-                        Profile.PurchaserProfile.PurchaserList.Builder updatePurchaseList = Profile.PurchaserProfile.PurchaserList.newBuilder(newMap.get(bundle));
-                        updatePurchaseList.addBundlewiseDetails(bundleWiseMap.get(bundle).getBundlewiseDetails(0));
-                        newMap.put(bundle,updatePurchaseList.build());
-                    } else {
-                        newMap.putAll(bundleWiseMap);
-                    }
-                }
-            };
-            mergedProfile.clearBundlewiseDetails();
-            mergedProfile.putAllBundlewiseDetails(newMap);
-            mergedProfile.setPurchaseTotal(purchaseTotal);
-            return mergedProfile.build();
+        public Aggre mergeAccumulators(Iterable<Aggre> accumulators) {
+            Aggre mergedAccum = new Aggre();
+            for (Aggre aggre : accumulators) {
+                mergedAccum.add(aggre);
+            }
+            return mergedAccum;
         }
 
         @Override
-        public Profile.PurchaserProfile extractOutput(Profile.PurchaserProfile accumulator) {
+        public Aggre extractOutput(Aggre accumulator) {
             return accumulator;
         }
+
     }
+
+
+
+
+
+    static class Aggre implements Serializable{
+        private final Map<String, Profile.PurchaserProfile.PurchaserList> bundleWiseList = new HashMap<>();
+        private Integer purchaseTotal = 0;
+
+        public void add(String bundle, Profile.PurchaserProfile.PurchaserDetails purchaserDetails){
+            edu.usfca.protobuf.Profile.PurchaserProfile.PurchaserList.Builder currentList = edu.usfca.protobuf.Profile.PurchaserProfile.PurchaserList.newBuilder(bundleWiseList.getOrDefault(bundle, edu.usfca.protobuf.Profile.PurchaserProfile.PurchaserList.getDefaultInstance()));
+            currentList.addBundlewiseDetails(purchaserDetails);
+            bundleWiseList.put(bundle,currentList.build());
+            purchaseTotal++;
+        }
+
+        public Map<String, Profile.PurchaserProfile.PurchaserList> getBundleWiseList(){
+            return bundleWiseList;
+        }
+
+        public void add(Aggre aggre) {
+            aggre.getBundleWiseList().forEach((bundle, bundleWiseList) -> {
+                bundleWiseList.getBundlewiseDetailsList().forEach(purchaserDetails -> {
+                    this.add(bundle,purchaserDetails);
+                });
+            });
+        }
+
+        public Integer getPurchaseTotal() {
+            return purchaseTotal;
+        }
+    }
+
 }
+
+
+
+
+
+
+
