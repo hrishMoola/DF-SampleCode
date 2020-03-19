@@ -10,7 +10,6 @@ import java.util.*;
 public class CustomUtils {
     public static class PurchaseProfilesCombiner extends Combine.CombineFn<Profile.PurchaserProfile, Aggre, Aggre> {
 
-
         @Override
         public Aggre createAccumulator() {
             return new Aggre();

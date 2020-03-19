@@ -209,6 +209,8 @@ public class ExtractData {
       }).withSideInputs(key));
     }
   }
+
+
   /**
    * This will be applied to the output of {@link MergeProfiles}.
    *
@@ -278,22 +280,22 @@ public class ExtractData {
             String inputBundle = processContext.sideInput(inputListView).get("bundle");
             int inputDays = Integer.parseInt(processContext.sideInput(inputListView).get("days"));
             if(bundle.equalsIgnoreCase(inputBundle)){
-              boolean consec = true;
               Set<Integer> events = new TreeSet<>();
               detailsList.getBundlewiseDetailsList().forEach(purchaserDetails -> {
                 events.add(millisToDay(purchaserDetails.getEventAt()));
               });
+              int consecCounter = 1;
+              int maxConsec = 1;
               if(events.size() >= inputDays){
                 Integer[] eventsArray = events.toArray(new Integer[0]);
                 for(int i = 0 ; i < eventsArray.length - 1; i ++){
-                  if (eventsArray[i + 1] - eventsArray[i] != 1) {
-                    consec = false;
-                    break;
+                  if (eventsArray[i + 1] - eventsArray[i] == 1) {
+                    consecCounter++;
+                    maxConsec = Math.max(maxConsec,consecCounter);
                   }
                 }
-              } else
-                consec = false;
-              if(consec)
+              }
+              if(maxConsec == inputDays)
                 processContext.output(processContext.element().getId());
             }
             });
