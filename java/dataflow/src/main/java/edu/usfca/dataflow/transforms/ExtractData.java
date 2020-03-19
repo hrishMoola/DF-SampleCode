@@ -1,6 +1,5 @@
 package edu.usfca.dataflow.transforms;
 
-import java.security.acl.Group;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -94,214 +93,192 @@ public class ExtractData {
     @Override
     public PCollection<DeviceId> expand(PCollection<PurchaserProfile> input) {
 
-//      return
-      return input.apply(ParDo.of(new DoFn<PurchaserProfile, KV<String, InAppPurchaseProfile>>() {
-                @ProcessElement
-                public void process(ProcessContext processContext) throws InvalidProtocolBufferException {
-                  String deviceId = JsonFormat.printer().print(processContext.element().getId());
-                  Map<String, PurchaserProfile.PurchaserList> bundleWiseDetails = processContext.element().getBundlewiseDetailsMap();
-                  bundleWiseDetails.forEach((bundle, detailsList) -> {
-                    if(bundles.contains(bundle)){
-                      InAppPurchaseProfile.Builder inappBuilder = InAppPurchaseProfile.newBuilder();
-                      AtomicReference<Long> totalAmount = new AtomicReference<>(0L);
-                      detailsList.getBundlewiseDetailsList().forEach(purchaserDetails -> {
-                            totalAmount.updateAndGet(v -> v + purchaserDetails.getAmount());
-                    });
-                      inappBuilder.setBundle(bundle).setNumPurchasers(1).setTotalAmount(totalAmount.get());
-                      processContext.output(KV.of(deviceId, inappBuilder.build()));
-                    }
-                  });
-                }
-              })).apply(GroupByKey.create()).apply(ParDo.of(new DoFn<KV<String, Iterable<InAppPurchaseProfile>>, DeviceId>() {
-            @ProcessElement
-        public void process(ProcessContext processContext) throws InvalidProtocolBufferException {
-              Iterable<InAppPurchaseProfile> inApps = processContext.element().getValue();
-              if (Iterables.size(inApps) >= numPurchases) {
-                for (InAppPurchaseProfile inapp : inApps) {
-                  if (inapp.getTotalAmount() >= totalAmount)
-                    processContext.output(getDeviceId(processContext.element().getKey()));
-                }
-              }
-            }
-
-        private DeviceId getDeviceId(String key) throws InvalidProtocolBufferException {
-          DeviceId.Builder messageBuilder = DeviceId.newBuilder();
-          JsonFormat.parser().usingTypeRegistry(JsonFormat.TypeRegistry.getEmptyTypeRegistry()).merge(key, messageBuilder);
-          return messageBuilder.build();
-        }
-      }
-      )).apply(Distinct.create());
-    }
-  }
-
-  /***
-   * Helper PTransform Method. Gets a KV of String to InAppPurchase Profile.
-   * Key is of type String, and can be Bundle name or Device Id, as per requirement.
-   * The subsequent grouping and merging then comes out with respect to the key in question. This is done as merging logic can be same, but grouping parameter is variable.
-   */
-
-  public static class GetMergedInAppPurchaseProfiles extends PTransform<PCollection<PurchaserProfile>, PCollection<KV<String,InAppPurchaseProfile>>> {
-
-    final String key;
-
-    GetMergedInAppPurchaseProfiles(String keyType) {
-      this.key = keyType;
-    }
-
-    @Override
-    public PCollection<KV<String,InAppPurchaseProfile>> expand(PCollection<PurchaserProfile> input) {
-
-      return input.apply(new CreateMultipleProfiles(this.key))
-              .apply(GroupByKey.create())
-              .apply(ParDo.of(new DoFn<KV<String, Iterable<InAppPurchaseProfile>>, KV<String,InAppPurchaseProfile>>() {
-                @ProcessElement
-                public void process(ProcessContext processContext){
-                  InAppPurchaseProfile.Builder mergedInApp = InAppPurchaseProfile.newBuilder();
-                  processContext.element().getValue().forEach(inAppPurchaseProfile -> {
-                    mergedInApp.setBundle(inAppPurchaseProfile.getBundle())
-                            .setTotalAmount(mergedInApp.getTotalAmount() + inAppPurchaseProfile.getTotalAmount());
-//                            .setNumPurchasers(inAppPurchaseProfile.getNumPurchasers());
-                });
-                  mergedInApp.setNumPurchasers(Iterables.size(processContext.element().getValue()));
-                  processContext.output(KV.of(processContext.element().getKey(), mergedInApp.build()));
-                }
-              }));
-    }
-  }
-
-  /**
-   * Helper
-   */
-
-  public static class CreateMultipleProfiles extends PTransform<PCollection<PurchaserProfile>, PCollection<KV<String,InAppPurchaseProfile>>> {
-
-    final String key;
-
-    CreateMultipleProfiles(String keyType) {
-      this.key = keyType;
-    }
-
-    @Override
-    public PCollection<KV<String, InAppPurchaseProfile>> expand(PCollection<PurchaserProfile> input) {
-      PCollectionView<String> key = input.getPipeline().apply(Create.of(this.key)).apply(View.asSingleton());
-
-      return input.apply(ParDo.of(new DoFn<PurchaserProfile, KV<String, InAppPurchaseProfile>>() {
-        @ProcessElement
-        public void process(ProcessContext processContext) throws InvalidProtocolBufferException {
-          String deviceId = JsonFormat.printer().print(processContext.element().getId());
-          Map<String, PurchaserProfile.PurchaserList> bundleWiseDetails = processContext.element().getBundlewiseDetailsMap();
-          bundleWiseDetails.forEach((bundle, detailsList) -> {
-            String keyType = processContext.sideInput(key);
-            InAppPurchaseProfile.Builder inappBuilder = InAppPurchaseProfile.newBuilder();
-            AtomicReference<Long> totalAmount = new AtomicReference<>(0L);
-            detailsList.getBundlewiseDetailsList().forEach(purchaserDetails -> {
-              totalAmount.updateAndGet(v -> v + purchaserDetails.getAmount());
-            });
-            inappBuilder.setBundle(bundle).setNumPurchasers(1).setTotalAmount(totalAmount.get());
-            if (keyType.equalsIgnoreCase("bundle"))
-              processContext.output(KV.of(bundle, inappBuilder.build()));
-            else if (keyType.equalsIgnoreCase("deviceId"))
-              processContext.output(KV.of(deviceId, inappBuilder.build()));
-            else if(keyType.equalsIgnoreCase("bundle^deviceid"))
-              processContext.output(KV.of(bundle + "^" + deviceId, inappBuilder.build()));
-          });
-        }
-      }).withSideInputs(key));
-    }
-  }
-
-
-  /**
-   * This will be applied to the output of {@link MergeProfiles}.
-   *
-   * NOTE: This is probably the hardest subtask of the three. I recommend you finish other tasks first, and work on this
-   * part separately at last.
-   *
-   * This PTransform should return a PC of DeviceIds (users) who are considered as "addicts."
-   *
-   * It takes two parameters: String parameter "bundle" that specifies the bundle of our interests and integer parameter
-   * "x" representing the number of consecutive (calendar) days.
-   *
-   * Return a PC of DeviceIds of the users who made at least one purchase per day for {@code x} consecutive (calendar)
-   * days (in UTC timezone) for the given app ("bundle").
-   *
-   * For instance, if a user made a purchase on "2020-02-01T10:59:59.999Z", another on "2020-02-02T20:59:59.999Z", and
-   * one more on "2020-02-03T23:59:59.999Z" (for the same app), then this user would be considered as an addict when
-   * {@code x=3} (we only consider the "dates", and since this user made at least one purchase on each of Feb 01, Feb
-   * 02, and Feb 03). On the other hand: if a user made a purchase on "2020-02-01T10:59:59.999Z", another on
-   * "2020-02-02T20:59:59.999Z", and * one more on "2020-02-02T23:59:59.999Z" (for the same app), then this user would
-   * NOT be considered as an addict. (this user made one purchase on Feb 01 and two on Feb 02, so that is NOT 3
-   * consecutive days).
-   *
-   * You may find https://currentmillis.com/ useful (for checking unix millis and converting it to UTC date).
-   *
-   * NOTE: If "bundle" is null/blank, throw IllegalArgumentException (use the usual apache.lang3 utility). If "x" is 0
-   * or less, then throw IllegalArgumentException as well.
-   *
-   * NOTE2: For your convenience, millisToDay method is provided (see __TestMillisToDay).
-   */
-  public static class ExtractAddicts extends PTransform<PCollection<PurchaserProfile>, PCollection<DeviceId>> {
-
-    final String bundle;
-    final int CONSEC_DAYS;
-
-    public ExtractAddicts(String bundle, int x) {
-      if (StringUtils.isBlank(bundle)) {
-        throw new IllegalArgumentException("");
-      }
-      if (x <= 0) {
-        throw new IllegalArgumentException("");
-      }
-      this.bundle = bundle;
-      this.CONSEC_DAYS = x;
-    }
-
-    public static int millisToDay(long millisInUtc) {
-      // You do NOT have to use this method, but it's provided as reference/example.
-      // This "rounds millis down" to the calendar day, and you should use that to determine whether a person made
-      // purchases for x consecutive days or not. You can find examples in unit tests.
-      return (int) (millisInUtc / 1000L / 3600L / 24L);
-    }
-
-    @Override
-    public PCollection<DeviceId> expand(PCollection<PurchaserProfile> input) {
-
-      Map<String, String> inputs = new HashMap<>();
-      inputs.put("bundle", bundle);
-      inputs.put("days", String.valueOf(CONSEC_DAYS));
-      PCollectionView<Map<String, String>> inputListView = input.getPipeline().apply(Create.of(inputs)).apply(View.asMap());
       return input.apply(ParDo.of(new DoFn<PurchaserProfile, DeviceId>() {
         @ProcessElement
         public void process(ProcessContext processContext) throws InvalidProtocolBufferException {
-
           Map<String, PurchaserProfile.PurchaserList> bundleWiseDetails = processContext.element().getBundlewiseDetailsMap();
-
+          if (processContext.element().getId().getUuid().contains("5F4A37BA"))
+            System.out.println("whaa");
+          AtomicReference<Long> summedAmount = new AtomicReference<>(0L);
+          AtomicReference<Integer> totalPurchases = new AtomicReference<>(0);
           bundleWiseDetails.forEach((bundle, detailsList) -> {
-            String inputBundle = processContext.sideInput(inputListView).get("bundle");
-            int inputDays = Integer.parseInt(processContext.sideInput(inputListView).get("days"));
-            if(bundle.equalsIgnoreCase(inputBundle)){
-              Set<Integer> events = new TreeSet<>();
+            if (bundles.contains(bundle)) {
               detailsList.getBundlewiseDetailsList().forEach(purchaserDetails -> {
-                events.add(millisToDay(purchaserDetails.getEventAt()));
+                summedAmount.updateAndGet(v -> v + purchaserDetails.getAmount());
               });
-              int consecCounter = 1;
-              int maxConsec = 1;
-              if(events.size() >= inputDays){
-                Integer[] eventsArray = events.toArray(new Integer[0]);
-                for(int i = 0 ; i < eventsArray.length - 1; i ++){
-                  if (eventsArray[i + 1] - eventsArray[i] == 1) {
-                    consecCounter++;
-                    maxConsec = Math.max(maxConsec,consecCounter);
-                  }
-                }
-              }
-              if(maxConsec == inputDays)
-                processContext.output(processContext.element().getId());
+              totalPurchases.updateAndGet(v -> v + detailsList.getBundlewiseDetailsCount());
             }
-            });
+            if (summedAmount.get() >= totalAmount && totalPurchases.get() >= numPurchases)
+              processContext.output(processContext.element().getId());
+          });
         }
-      }).withSideInputs(inputListView));
-//      return null;
+      })).apply(Distinct.create());
     }
   }
-}
+
+    /***
+     * Helper PTransform Method. Gets a KV of String to InAppPurchase Profile.
+     * Key is of type String, and can be Bundle name or Device Id, as per requirement.
+     * The subsequent grouping and merging then comes out with respect to the key in question. This is done as merging logic can be same, but grouping parameter is variable.
+     */
+
+    public static class GetMergedInAppPurchaseProfiles extends PTransform<PCollection<PurchaserProfile>, PCollection<KV<String, InAppPurchaseProfile>>> {
+
+      final String key;
+
+      GetMergedInAppPurchaseProfiles(String keyType) {
+        this.key = keyType;
+      }
+
+      @Override
+      public PCollection<KV<String, InAppPurchaseProfile>> expand(PCollection<PurchaserProfile> input) {
+
+        return input.apply(new CreateMultipleProfiles(this.key))
+                .apply(GroupByKey.create())
+                .apply(ParDo.of(new DoFn<KV<String, Iterable<InAppPurchaseProfile>>, KV<String, InAppPurchaseProfile>>() {
+                  @ProcessElement
+                  public void process(ProcessContext processContext) {
+                    InAppPurchaseProfile.Builder mergedInApp = InAppPurchaseProfile.newBuilder();
+                    processContext.element().getValue().forEach(inAppPurchaseProfile -> {
+                      mergedInApp.setBundle(inAppPurchaseProfile.getBundle())
+                              .setTotalAmount(mergedInApp.getTotalAmount() + inAppPurchaseProfile.getTotalAmount());
+                    });
+                    mergedInApp.setNumPurchasers(Iterables.size(processContext.element().getValue()));
+                    processContext.output(KV.of(processContext.element().getKey(), mergedInApp.build()));
+                  }
+                }));
+      }
+    }
+
+    /**
+     * Helper
+     */
+
+    public static class CreateMultipleProfiles extends PTransform<PCollection<PurchaserProfile>, PCollection<KV<String, InAppPurchaseProfile>>> {
+
+      final String key;
+
+      CreateMultipleProfiles(String keyType) {
+        this.key = keyType;
+      }
+
+      @Override
+      public PCollection<KV<String, InAppPurchaseProfile>> expand(PCollection<PurchaserProfile> input) {
+        PCollectionView<String> key = input.getPipeline().apply(Create.of(this.key)).apply(View.asSingleton());
+
+        return input.apply(ParDo.of(new DoFn<PurchaserProfile, KV<String, InAppPurchaseProfile>>() {
+          @ProcessElement
+          public void process(ProcessContext processContext) throws InvalidProtocolBufferException {
+            String deviceId = JsonFormat.printer().print(processContext.element().getId());
+            Map<String, PurchaserProfile.PurchaserList> bundleWiseDetails = processContext.element().getBundlewiseDetailsMap();
+            bundleWiseDetails.forEach((bundle, detailsList) -> {
+              String keyType = processContext.sideInput(key);
+              InAppPurchaseProfile.Builder inappBuilder = InAppPurchaseProfile.newBuilder();
+              AtomicReference<Long> totalAmount = new AtomicReference<>(0L);
+              detailsList.getBundlewiseDetailsList().forEach(purchaserDetails -> {
+                totalAmount.updateAndGet(v -> v + purchaserDetails.getAmount());
+              });
+              inappBuilder.setBundle(bundle).setNumPurchasers(1).setTotalAmount(totalAmount.get());
+              if (keyType.equalsIgnoreCase("bundle"))
+                processContext.output(KV.of(bundle, inappBuilder.build()));
+            });
+          }
+        }).withSideInputs(key));
+      }
+    }
+
+
+    /**
+     * This will be applied to the output of {@link MergeProfiles}.
+     * <p>
+     * NOTE: This is probably the hardest subtask of the three. I recommend you finish other tasks first, and work on this
+     * part separately at last.
+     * <p>
+     * This PTransform should return a PC of DeviceIds (users) who are considered as "addicts."
+     * <p>
+     * It takes two parameters: String parameter "bundle" that specifies the bundle of our interests and integer parameter
+     * "x" representing the number of consecutive (calendar) days.
+     * <p>
+     * Return a PC of DeviceIds of the users who made at least one purchase per day for {@code x} consecutive (calendar)
+     * days (in UTC timezone) for the given app ("bundle").
+     * <p>
+     * For instance, if a user made a purchase on "2020-02-01T10:59:59.999Z", another on "2020-02-02T20:59:59.999Z", and
+     * one more on "2020-02-03T23:59:59.999Z" (for the same app), then this user would be considered as an addict when
+     * {@code x=3} (we only consider the "dates", and since this user made at least one purchase on each of Feb 01, Feb
+     * 02, and Feb 03). On the other hand: if a user made a purchase on "2020-02-01T10:59:59.999Z", another on
+     * "2020-02-02T20:59:59.999Z", and * one more on "2020-02-02T23:59:59.999Z" (for the same app), then this user would
+     * NOT be considered as an addict. (this user made one purchase on Feb 01 and two on Feb 02, so that is NOT 3
+     * consecutive days).
+     * <p>
+     * You may find https://currentmillis.com/ useful (for checking unix millis and converting it to UTC date).
+     * <p>
+     * NOTE: If "bundle" is null/blank, throw IllegalArgumentException (use the usual apache.lang3 utility). If "x" is 0
+     * or less, then throw IllegalArgumentException as well.
+     * <p>
+     * NOTE2: For your convenience, millisToDay method is provided (see __TestMillisToDay).
+     */
+    public static class ExtractAddicts extends PTransform<PCollection<PurchaserProfile>, PCollection<DeviceId>> {
+
+      final String bundle;
+      final int CONSEC_DAYS;
+
+      public ExtractAddicts(String bundle, int x) {
+        if (StringUtils.isBlank(bundle)) {
+          throw new IllegalArgumentException("");
+        }
+        if (x <= 0) {
+          throw new IllegalArgumentException("");
+        }
+        this.bundle = bundle;
+        this.CONSEC_DAYS = x;
+      }
+
+      public static int millisToDay(long millisInUtc) {
+        // You do NOT have to use this method, but it's provided as reference/example.
+        // This "rounds millis down" to the calendar day, and you should use that to determine whether a person made
+        // purchases for x consecutive days or not. You can find examples in unit tests.
+        return (int) (millisInUtc / 1000L / 3600L / 24L);
+      }
+
+      @Override
+      public PCollection<DeviceId> expand(PCollection<PurchaserProfile> input) {
+
+        Map<String, String> inputs = new HashMap<>();
+        inputs.put("bundle", bundle);
+        inputs.put("days", String.valueOf(CONSEC_DAYS));
+        PCollectionView<Map<String, String>> inputListView = input.getPipeline().apply(Create.of(inputs)).apply(View.asMap());
+        return input.apply(ParDo.of(new DoFn<PurchaserProfile, DeviceId>() {
+          @ProcessElement
+          public void process(ProcessContext processContext) throws InvalidProtocolBufferException {
+
+            Map<String, PurchaserProfile.PurchaserList> bundleWiseDetails = processContext.element().getBundlewiseDetailsMap();
+
+            bundleWiseDetails.forEach((bundle, detailsList) -> {
+              String inputBundle = processContext.sideInput(inputListView).get("bundle");
+              int inputDays = Integer.parseInt(processContext.sideInput(inputListView).get("days"));
+              if (bundle.equalsIgnoreCase(inputBundle)) {
+                boolean consec = true;
+                Set<Integer> events = new TreeSet<>();
+                detailsList.getBundlewiseDetailsList().forEach(purchaserDetails -> {
+                  events.add(millisToDay(purchaserDetails.getEventAt()));
+                });
+                if (events.size() >= inputDays) {
+                  Integer[] eventsArray = events.toArray(new Integer[0]);
+                  for (int i = 0; i < eventsArray.length - 1; i++) {
+                    if (eventsArray[i + 1] - eventsArray[i] != 1) {
+                      consec = false;
+                      break;
+                    }
+                  }
+                } else
+                  consec = false;
+                if (consec)
+                  processContext.output(processContext.element().getId());
+              }
+            });
+          }
+        }).withSideInputs(inputListView));
+      }
+    }
+  }
+
