@@ -105,39 +105,14 @@ public class PurchaserProfiles {
 
     @Override
     public PCollection<PurchaserProfile> expand(PCollection<PurchaserProfile> input) {
-
-
-//      PCollection<PurchaserProfile> profiles = null;
-        return input.apply(MapElements.into(TypeDescriptors.kvs(TypeDescriptors.strings(), new TypeDescriptor<PurchaserProfile>(){}))
+      return input.apply(MapElements.into(TypeDescriptors.kvs(TypeDescriptors.strings(), new TypeDescriptor<PurchaserProfile>(){}))
                 .via((ProcessFunction<PurchaserProfile, KV<String, PurchaserProfile>>) item -> KV.of(JsonFormat.printer().print(item.getId()), item)))
                 .apply(Combine.perKey(new CustomUtils.PurchaseProfilesCombiner()))
-//                .apply(ParDo.of(new DoFn<KV<String, PurchaserProfile>, PurchaserProfile>() {
-//                  @ProcessElement
-//                  public void process(ProcessContext processContext) throws InvalidProtocolBufferException {
-//                    processContext.output(PurchaserProfile.newBuilder(processContext.element().getValue()).setId(getDeviceId(processContext.element().getKey())).build());
-//                  }
-//                }));
-//                .apply(ParDo.of(new DoFn<KV<String, PurchaseProfilesCombiner.AccumT>, PurchaserProfile>() {
-////                  @ProcessElement
-////                  public void process(ProcessContext processContext) throws InvalidProtocolBufferException {
-////                    Map<String, PurchaserProfile.PurchaserList> bundleWiseList = new HashMap<>();
-////                    PurchaseProfilesCombiner.AccumT accumulator = processContext.element().getValue();
-////                    Common.DeviceId deviceId = getDeviceId(processContext.element().getKey());
-////                    if(deviceId.getUuid().contains("CBA25CC2")){
-////                      System.out.println("break");
-////                    }
-////                      for(int i = 0; i < accumulator.counter ; i ++){
-////                      PurchaserProfile.PurchaserList.Builder currentList = PurchaserProfile.PurchaserList.newBuilder(bundleWiseList.getOrDefault(accumulator.bundle[i], PurchaserProfile.PurchaserList.getDefaultInstance()));
-////                      currentList.addBundlewiseDetails(PurchaserProfile.PurchaserDetails.newBuilder().setAmount(accumulator.amount[i]).setEventAt(accumulator.eventAt[i]).setEventId("123L").setStoreName("some").build());
-////                    }
-////                    PurchaserProfile.Builder purchaseProfileBuilder = PurchaserProfile.newBuilder();
-////                    processContext.output(purchaseProfileBuilder.setPurchaseTotal(accumulator.counter).setId(deviceId)
-////                            .putAllBundlewiseDetails(bundleWiseList).build());
-////                  }
-////                }));
                       .apply(ParDo.of(new DoFn<KV<String, Aggre>, PurchaserProfile>() {
                   @ProcessElement
                   public void process(ProcessContext processContext) throws InvalidProtocolBufferException {
+                    if(getDeviceId(processContext.element().getKey()).getUuid().contains("00000000"))
+                      System.out.println("w");
                     processContext.output(PurchaserProfile.newBuilder()
                             .setId(getDeviceId(processContext.element().getKey()))
                             .putAllBundlewiseDetails(processContext.element().getValue().getBundleWiseList())
@@ -145,8 +120,6 @@ public class PurchaserProfiles {
                             .build());
                   }
                 }));
-//       profiles.apply(ParDo.of(new someDoFn()));
-//       return profiles;
     }
     private Common.DeviceId getDeviceId(String key) throws InvalidProtocolBufferException {
       Common.DeviceId.Builder messageBuilder = Common.DeviceId.newBuilder();

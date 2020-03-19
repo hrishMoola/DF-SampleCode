@@ -97,8 +97,6 @@ public class ExtractData {
         @ProcessElement
         public void process(ProcessContext processContext) throws InvalidProtocolBufferException {
           Map<String, PurchaserProfile.PurchaserList> bundleWiseDetails = processContext.element().getBundlewiseDetailsMap();
-          if (processContext.element().getId().getUuid().contains("5F4A37BA"))
-            System.out.println("whaa");
           AtomicReference<Long> summedAmount = new AtomicReference<>(0L);
           AtomicReference<Integer> totalPurchases = new AtomicReference<>(0);
           bundleWiseDetails.forEach((bundle, detailsList) -> {
@@ -169,7 +167,6 @@ public class ExtractData {
         return input.apply(ParDo.of(new DoFn<PurchaserProfile, KV<String, InAppPurchaseProfile>>() {
           @ProcessElement
           public void process(ProcessContext processContext) throws InvalidProtocolBufferException {
-            String deviceId = JsonFormat.printer().print(processContext.element().getId());
             Map<String, PurchaserProfile.PurchaserList> bundleWiseDetails = processContext.element().getBundlewiseDetailsMap();
             bundleWiseDetails.forEach((bundle, detailsList) -> {
               String keyType = processContext.sideInput(key);
@@ -250,30 +247,31 @@ public class ExtractData {
         return input.apply(ParDo.of(new DoFn<PurchaserProfile, DeviceId>() {
           @ProcessElement
           public void process(ProcessContext processContext) throws InvalidProtocolBufferException {
-
             Map<String, PurchaserProfile.PurchaserList> bundleWiseDetails = processContext.element().getBundlewiseDetailsMap();
-
+            String inputBundle = processContext.sideInput(inputListView).get("bundle");
+            int inputDays = Integer.parseInt(processContext.sideInput(inputListView).get("days"));
             bundleWiseDetails.forEach((bundle, detailsList) -> {
-              String inputBundle = processContext.sideInput(inputListView).get("bundle");
-              int inputDays = Integer.parseInt(processContext.sideInput(inputListView).get("days"));
               if (bundle.equalsIgnoreCase(inputBundle)) {
-                boolean consec = true;
                 Set<Integer> events = new TreeSet<>();
                 detailsList.getBundlewiseDetailsList().forEach(purchaserDetails -> {
                   events.add(millisToDay(purchaserDetails.getEventAt()));
                 });
-                if (events.size() >= inputDays) {
-                  Integer[] eventsArray = events.toArray(new Integer[0]);
-                  for (int i = 0; i < eventsArray.length - 1; i++) {
-                    if (eventsArray[i + 1] - eventsArray[i] != 1) {
-                      consec = false;
-                      break;
-                    }
-                  }
-                } else
-                  consec = false;
-                if (consec)
+                if (inputDays == 1)
                   processContext.output(processContext.element().getId());
+                else{
+                  int consecCount = 1 ;
+                  if (events.size() >= inputDays) {
+                    Integer[] eventsArray = events.toArray(new Integer[0]);
+                    for (int i = 0; i < eventsArray.length - 1; i++) {
+                      if (eventsArray[i + 1] - eventsArray[i] != 1) {
+                          consecCount = 1;
+                      } else if(++consecCount == inputDays) {
+                          processContext.output(processContext.element().getId());
+                          break;
+                        }
+                    }
+                }
+              }
               }
             });
           }
