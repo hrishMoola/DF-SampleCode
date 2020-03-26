@@ -63,7 +63,7 @@ public class Main {
   public static void main(String[] args) {
     Pipeline p = Pipeline.create();
 
-    p.apply(TextIO.read().from("../dataflow/resources/sample-tiny.txt")) //
+    p.apply(TextIO.read().from("C:\\Users\\mahal\\cs686\\projects\\cs686-proj3-hrishi-moola\\java\\dataflow\\resources\\sample-tiny.txt")) //
         .apply(new GetProfilesFromEvents()).apply(new MergeProfiles()).apply(new ExtractAddicts("id686486", 4))
         .apply(ParDo.of(new DoFn<Message, Void>() {
           @ProcessElement

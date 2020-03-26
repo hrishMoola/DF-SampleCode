@@ -20,7 +20,7 @@ public class CustomUtils {
             input.getBundlewiseDetailsMap().forEach((bundle, details) -> {
                 mutableAccumulator.add(bundle, edu.usfca.protobuf.Profile.PurchaserProfile.PurchaserDetails.newBuilder().setAmount(details.getBundlewiseDetailsList().get(0)
                         .getAmount()).setEventAt(details.getBundlewiseDetailsList().get(0).getEventAt())
-                        .setEventId("123L").setStoreName("some").build());
+                        .setEventId("123L").setStoreName("something").build());              //junk values for fields not in use for this project
             });
             return mutableAccumulator;
         }
