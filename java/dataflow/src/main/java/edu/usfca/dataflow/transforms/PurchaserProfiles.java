@@ -111,8 +111,6 @@ public class PurchaserProfiles {
                       .apply(ParDo.of(new DoFn<KV<String, Aggre>, PurchaserProfile>() {
                   @ProcessElement
                   public void process(ProcessContext processContext) throws InvalidProtocolBufferException {
-                    if(getDeviceId(processContext.element().getKey()).getUuid().contains("00000000"))
-                      System.out.println("w");
                     processContext.output(PurchaserProfile.newBuilder()
                             .setId(getDeviceId(processContext.element().getKey()))
                             .putAllBundlewiseDetails(processContext.element().getValue().getBundleWiseList())
@@ -127,29 +125,21 @@ public class PurchaserProfiles {
       return messageBuilder.build();
     }
   }
+
+  /***
+   * Reusable DoFn for printing contents to console for debugging
+   */
   public static class someDoFn extends DoFn<PurchaserProfile, Void> {
     @Setup
     public void setup() {
-//      System.out.println("--- Starting to print out the contents. This is likely to be printed more than once. Why?");
+      System.out.println("Setting up printer!");
     }
 
     @ProcessElement
     public void process(@Element PurchaserProfile elem) {
-      if(elem.getId().getUuid().contains("CBA25CC2"))
+      if(elem.getId().getUuid().contains("CBA25CC2"))    //added for debugging specific message
         System.out.format("Profiles: %s\n", elem.toString());
     }
   }
-
-
-//
-//  Map<String, edu.usfca.protobuf.Profile.PurchaserProfile.PurchaserList> bundleWiseList = new HashMap<>();
-//            for(int i = 0; i < accumulator.counter ; i ++){
-//    edu.usfca.protobuf.Profile.PurchaserProfile.PurchaserList.Builder currentList = edu.usfca.protobuf.Profile.PurchaserProfile.PurchaserList.newBuilder(bundleWiseList.getOrDefault(accumulator.bundle[i], edu.usfca.protobuf.Profile.PurchaserProfile.PurchaserList.getDefaultInstance()));
-//    currentList.addBundlewiseDetails(edu.usfca.protobuf.Profile.PurchaserProfile.PurchaserDetails.newBuilder().setAmount(accumulator.amount[i]).setEventAt(accumulator.eventAt[i]).setEventId("123L").setStoreName("some").build());
-//  }
-//  edu.usfca.protobuf.Profile.PurchaserProfile.Builder purchaseProfileBuilder = edu.usfca.protobuf.Profile.PurchaserProfile.newBuilder();
-//            return purchaseProfileBuilder.setPurchaseTotal(accumulator.counter)
-//          .putAllBundlewiseDetails(bundleWiseList).build();
-//}
 
 }

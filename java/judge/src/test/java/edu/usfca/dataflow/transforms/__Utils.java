@@ -1,5 +1,6 @@
 package edu.usfca.dataflow.transforms;
 
+import edu.usfca.dataflow.utils.ProtoUtils;
 import org.junit.Rule;
 import org.junit.rules.Timeout;
 
@@ -23,7 +24,9 @@ public class __Utils {
 
   // Simply normalize the uuid part to uppercase.
   static DeviceId getCanonicalDeviceId(DeviceId id) {
-    return id.toBuilder().setUuid(id.getUuid().toUpperCase()).build();
+    DeviceId finalId = id.toBuilder().setUuid(id.getUuid().toUpperCase()).build();
+    System.out.println("Shazam : " + finalId.getUuid().toUpperCase() + " : " + ProtoUtils.encodeMessageBase64(finalId));
+    return finalId;
   }
 
   static String getMaskA(String uuid) {
